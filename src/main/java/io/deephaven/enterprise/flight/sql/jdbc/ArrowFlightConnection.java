@@ -17,19 +17,24 @@
 package io.deephaven.enterprise.flight.sql.jdbc;
 
 import io.deephaven.enterprise.flight.sql.jdbc.client.ArrowFlightSqlClientHandler;
+import io.deephaven.enterprise.flight.sql.jdbc.client.utils.FlightClientCache;
 import io.deephaven.enterprise.flight.sql.jdbc.utils.ArrowFlightConnectionConfigImpl;
 import io.netty.util.concurrent.DefaultThreadFactory;
-import java.sql.SQLException;
-import java.util.Properties;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import io.deephaven.enterprise.flight.sql.jdbc.client.utils.FlightClientCache;
 import org.apache.arrow.flight.FlightClient;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.util.AutoCloseables;
 import org.apache.arrow.util.Preconditions;
 import org.apache.calcite.avatica.AvaticaConnection;
 import org.apache.calcite.avatica.AvaticaFactory;
+
+import java.sql.SQLException;
+import java.util.Properties;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import static io.deephaven.enterprise.flight.sql.jdbc.utils.ArrowFlightConnectionConfigImpl.ArrowFlightConnectionProperty.replaceSemiColons;
+
+//import static utils.ArrowFlightConnectionConfigImpl.ArrowFlightConnectionProperty.replaceSemiColons;
 
 /** Connection to the Arrow Flight server. */
 public final class ArrowFlightConnection extends AvaticaConnection {
@@ -82,7 +87,7 @@ public final class ArrowFlightConnection extends AvaticaConnection {
       final Properties properties,
       final BufferAllocator allocator)
       throws SQLException {
-    url = ArrowFlightConnectionConfigImpl.ArrowFlightConnectionProperty.replaceSemiColons(url);
+    url = replaceSemiColons(url);
     final ArrowFlightConnectionConfigImpl config = new ArrowFlightConnectionConfigImpl(properties);
     final ArrowFlightSqlClientHandler clientHandler = createNewClientHandler(config, allocator);
     return new ArrowFlightConnection(
@@ -98,6 +103,7 @@ public final class ArrowFlightConnection extends AvaticaConnection {
           .withPort(config.getPort())
           .withUsername(config.getUser())
           .withPassword(config.getPassword())
+          .withPqName(config.getPqName())
           .withTrustStorePath(config.getTrustStorePath())
           .withTrustStorePassword(config.getTrustStorePassword())
           .withSystemTrustStore(config.useSystemTrustStore())

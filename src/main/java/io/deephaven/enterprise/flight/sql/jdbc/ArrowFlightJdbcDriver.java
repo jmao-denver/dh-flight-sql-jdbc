@@ -16,21 +16,7 @@
  */
 package io.deephaven.enterprise.flight.sql.jdbc;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.sql.SQLException;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Properties;
-import java.util.logging.Logger;
-
-import io.deephaven.enterprise.flight.sql.jdbc.utils.ArrowFlightConnectionConfigImpl;
+import io.deephaven.enterprise.flight.sql.jdbc.utils.ArrowFlightConnectionConfigImpl.ArrowFlightConnectionProperty;
 import io.deephaven.enterprise.flight.sql.jdbc.utils.UrlParser;
 import org.apache.arrow.flight.FlightRuntimeException;
 import org.apache.arrow.memory.RootAllocator;
@@ -41,12 +27,22 @@ import org.apache.calcite.avatica.DriverVersion;
 import org.apache.calcite.avatica.Meta;
 import org.apache.calcite.avatica.UnregisteredDriver;
 
+import java.net.URI;
+import java.sql.SQLException;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.logging.Logger;
+
+import static io.deephaven.enterprise.flight.sql.jdbc.utils.ArrowFlightConnectionConfigImpl.ArrowFlightConnectionProperty.replaceSemiColons;
+
+
 /** JDBC driver for querying data from an Apache Arrow Flight server. */
 public class ArrowFlightJdbcDriver extends UnregisteredDriver {
-  private static final String CONNECT_STRING_PREFIX = "jdbc:arrow-flight-sql://";
-  private static final String CONNECT_STRING_PREFIX_DEPRECATED = "jdbc:arrow-flight://";
+  private static final String CONNECT_STRING_PREFIX = "jdbc:deephaven-flight-sql://";
   private static final String CONNECTION_STRING_EXPECTED =
-      "jdbc:arrow-flight-sql://[host][:port][?param1=value&...]";
+      "jdbc:deephaven-flight-sql://[host][:port][?param1=value&...]";
   private static DriverVersion version;
 
   static {
@@ -60,8 +56,7 @@ public class ArrowFlightJdbcDriver extends UnregisteredDriver {
       System.setProperty(key, Boolean.TRUE.toString());
     }
 
-    // Make sure we only register the Deephaven Enterprise Flight SQL JDBC  driver with the DriverManager
-//    new ArrowFlightJdbcDriver().register();
+    new ArrowFlightJdbcDriver().register();
   }
 
   @Override
@@ -102,48 +97,48 @@ public class ArrowFlightJdbcDriver extends UnregisteredDriver {
   @Override
   @SuppressWarnings("StringSplitter")
   protected DriverVersion createDriverVersion() {
-    if (version == null) {
-      final InputStream flightProperties =
-          this.getClass().getResourceAsStream("/properties/flight.properties");
-      if (flightProperties == null) {
-        throw new RuntimeException(
-            "Flight Properties not found. Ensure the JAR was built properly.");
-      }
-      try (final Reader reader =
-          new BufferedReader(new InputStreamReader(flightProperties, StandardCharsets.UTF_8))) {
-        final Properties properties = new Properties();
-        properties.load(reader);
-
-        final String parentName = properties.getProperty("org.apache.arrow.flight.name");
-        final String parentVersion = properties.getProperty("org.apache.arrow.flight.version");
-        final String[] pVersion = parentVersion.split("\\.");
-
-        final int parentMajorVersion = Integer.parseInt(pVersion[0]);
-        final int parentMinorVersion = Integer.parseInt(pVersion[1]);
-
-        final String childName = properties.getProperty("org.apache.arrow.flight.jdbc-driver.name");
-        final String childVersion =
-            properties.getProperty("org.apache.arrow.flight.jdbc-driver.version");
-        final String[] cVersion = childVersion.split("\\.");
-
-        final int childMajorVersion = Integer.parseInt(cVersion[0]);
-        final int childMinorVersion = Integer.parseInt(cVersion[1]);
+//    if (version == null) {
+//      final InputStream flightProperties =
+//          this.getClass().getResourceAsStream("/properties/flight.properties");
+//      if (flightProperties == null) {
+//        throw new RuntimeException(
+//            "Flight Properties not found. Ensure the JAR was built properly.");
+//      }
+//      try (final Reader reader =
+//          new BufferedReader(new InputStreamReader(flightProperties, StandardCharsets.UTF_8))) {
+//        final Properties properties = new Properties();
+//        properties.load(reader);
+//
+//        final String parentName = properties.getProperty("org.apache.arrow.flight.name");
+//        final String parentVersion = properties.getProperty("org.apache.arrow.flight.version");
+//        final String[] pVersion = parentVersion.split("\\.");
+//
+//        final int parentMajorVersion = Integer.parseInt(pVersion[0]);
+//        final int parentMinorVersion = Integer.parseInt(pVersion[1]);
+//
+//        final String childName = properties.getProperty("org.apache.arrow.flight.jdbc-driver.name");
+//        final String childVersion =
+//            properties.getProperty("org.apache.arrow.flight.jdbc-driver.version");
+//        final String[] cVersion = childVersion.split("\\.");
+//
+//        final int childMajorVersion = Integer.parseInt(cVersion[0]);
+//        final int childMinorVersion = Integer.parseInt(cVersion[1]);
 
         version =
             new DriverVersion(
-                childName,
-                childVersion,
-                parentName,
-                parentVersion,
+                "Deephaven Flight Sql JDBC Driver",
+                "0.1.0`",
+                "Deephaven Flight Sql JDBC Driver",
+                "0.1.0",
                 true,
-                childMajorVersion,
-                childMinorVersion,
-                parentMajorVersion,
-                parentMinorVersion);
-      } catch (final IOException e) {
-        throw new RuntimeException("Failed to load driver version.", e);
-      }
-    }
+                0,
+                1,
+                0,
+                1);
+//      } catch (final IOException e) {
+//        throw new RuntimeException("Failed to load driver version.", e);
+//      }
+//    }
 
     return version;
   }
@@ -161,8 +156,7 @@ public class ArrowFlightJdbcDriver extends UnregisteredDriver {
   @Override
   public boolean acceptsURL(final String url) {
     Preconditions.checkNotNull(url);
-    return url.startsWith(CONNECT_STRING_PREFIX)
-        || url.startsWith(CONNECT_STRING_PREFIX_DEPRECATED);
+    return url.startsWith(CONNECT_STRING_PREFIX);
   }
 
   /**
@@ -170,7 +164,7 @@ public class ArrowFlightJdbcDriver extends UnregisteredDriver {
    * {@link #CONNECT_STRING_PREFIX}.
    *
    * <p>This method gets the args if the provided URL follows this pattern: {@code
-   * jdbc:arrow-flight-sql://<host>:<port>[/?key1=val1&key2=val2&(...)]}
+   * jdbc:deephaven-flight-sql://<host>:<port>[/?key1=val1&key2=val2&(...)]}
    *
    * <table border="1">
    *    <tr>
@@ -232,7 +226,7 @@ public class ArrowFlightJdbcDriver extends UnregisteredDriver {
      */
 
     final Properties resultMap = new Properties();
-    url = ArrowFlightConnectionConfigImpl.ArrowFlightConnectionProperty.replaceSemiColons(url);
+    url = replaceSemiColons(url);
 
     if (!url.startsWith("jdbc:")) {
       throw new SQLException(
@@ -251,8 +245,8 @@ public class ArrowFlightJdbcDriver extends UnregisteredDriver {
       throw new SQLException("Malformed/invalid URL!", e);
     }
 
-    if (!Objects.equals(uri.getScheme(), "arrow-flight")
-        && !Objects.equals(uri.getScheme(), "arrow-flight-sql")) {
+    if (!Objects.equals(uri.getScheme(), "deephaven-flight")
+        && !Objects.equals(uri.getScheme(), "deephaven-flight-sql")) {
       return Optional.empty();
     }
 
@@ -263,8 +257,8 @@ public class ArrowFlightJdbcDriver extends UnregisteredDriver {
       throw new SQLException(
           "URL must have a port. Expected format: " + CONNECTION_STRING_EXPECTED);
     }
-    resultMap.put(ArrowFlightConnectionConfigImpl.ArrowFlightConnectionProperty.HOST.camelName(), uri.getHost()); // host
-    resultMap.put(ArrowFlightConnectionConfigImpl.ArrowFlightConnectionProperty.PORT.camelName(), uri.getPort()); // port
+    resultMap.put(ArrowFlightConnectionProperty.HOST.camelName(), uri.getHost()); // host
+    resultMap.put(ArrowFlightConnectionProperty.PORT.camelName(), uri.getPort()); // port
 
     final String extraParams = uri.getRawQuery(); // optional params
     if (extraParams != null) {

@@ -16,13 +16,6 @@
  */
 package io.deephaven.enterprise.flight.sql.jdbc.utils;
 
-import java.time.Duration;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Properties;
-import io.deephaven.enterprise.flight.sql.jdbc.ArrowFlightConnection;
 import org.apache.arrow.flight.CallHeaders;
 import org.apache.arrow.flight.CallOption;
 import org.apache.arrow.flight.FlightCallHeaders;
@@ -31,6 +24,9 @@ import org.apache.arrow.util.Preconditions;
 import org.apache.calcite.avatica.ConnectionConfig;
 import org.apache.calcite.avatica.ConnectionConfigImpl;
 import org.apache.calcite.avatica.ConnectionProperty;
+
+import java.time.Duration;
+import java.util.*;
 
 /** A {@link ConnectionConfig} for the {@link ArrowFlightConnection}. */
 public final class ArrowFlightConnectionConfigImpl extends ConnectionConfigImpl {
@@ -73,6 +69,10 @@ public final class ArrowFlightConnectionConfigImpl extends ConnectionConfigImpl 
   public String getPassword() {
     return ArrowFlightConnectionProperty.PASSWORD.getString(properties);
   }
+
+  public String getPqName() { return ArrowFlightConnectionProperty.PQNAME.getString(properties); }
+
+
 
   public String getToken() {
     return ArrowFlightConnectionProperty.TOKEN.getString(properties);
@@ -217,6 +217,7 @@ public final class ArrowFlightConnectionConfigImpl extends ConnectionConfigImpl 
     PORT("port", null, Type.NUMBER, true),
     USER("user", null, Type.STRING, false),
     PASSWORD("password", null, Type.STRING, false),
+    PQNAME("pqname", null , Type.STRING, true ),
     USE_ENCRYPTION("useEncryption", true, Type.BOOLEAN, false),
     CERTIFICATE_VERIFICATION("disableCertificateVerification", false, Type.BOOLEAN, false),
     TRUST_STORE("trustStore", null, Type.STRING, false),
@@ -231,8 +232,7 @@ public final class ArrowFlightConnectionConfigImpl extends ConnectionConfigImpl 
     RETAIN_AUTH("retainAuth", true, Type.BOOLEAN, false),
     CATALOG("catalog", null, Type.STRING, false),
     CONNECT_TIMEOUT_MILLIS("connectTimeoutMs", 10000, Type.NUMBER, false),
-    USE_CLIENT_CACHE("useClientCache", true, Type.BOOLEAN, false),
-    ;
+    USE_CLIENT_CACHE("useClientCache", true, Type.BOOLEAN, false);
 
     private final String camelName;
     private final Object defaultValue;

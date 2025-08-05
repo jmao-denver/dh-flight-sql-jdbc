@@ -17,46 +17,20 @@
 package io.deephaven.enterprise.flight.sql.jdbc.client;
 
 import com.google.common.collect.ImmutableMap;
-import io.grpc.netty.NettyChannelBuilder;
-import io.netty.channel.ChannelOption;
-import java.io.IOException;
-import java.net.URI;
-import java.security.GeneralSecurityException;
-import java.sql.SQLException;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import io.deephaven.enterprise.flight.sql.jdbc.client.utils.ClientAuthenticationUtils;
+import io.deephaven.enterprise.auth.UserContext;
+import io.deephaven.enterprise.config.HttpUrlPropertyInputStreamLoader;
+import io.deephaven.enterprise.controller.client.ControllerClientGrpc;
+import io.deephaven.enterprise.dnd.client.DeephavenClusterConnection;
+import io.deephaven.enterprise.dnd.client.DndSessionFactoryFlight;
+import io.deephaven.enterprise.dnd.client.DndSessionFlight;
 import io.deephaven.enterprise.flight.sql.jdbc.client.utils.FlightClientCache;
 import io.deephaven.enterprise.flight.sql.jdbc.client.utils.FlightLocationQueue;
-import org.apache.arrow.flight.CallOption;
-import org.apache.arrow.flight.CallStatus;
-import org.apache.arrow.flight.CloseSessionRequest;
-import org.apache.arrow.flight.FlightClient;
-import org.apache.arrow.flight.FlightClientMiddleware;
-import org.apache.arrow.flight.FlightEndpoint;
-import org.apache.arrow.flight.FlightGrpcUtils;
-import org.apache.arrow.flight.FlightInfo;
-import org.apache.arrow.flight.FlightRuntimeException;
-import org.apache.arrow.flight.FlightStatusCode;
-import org.apache.arrow.flight.Location;
-import org.apache.arrow.flight.LocationSchemes;
-import org.apache.arrow.flight.SessionOptionValue;
-import org.apache.arrow.flight.SessionOptionValueFactory;
-import org.apache.arrow.flight.SetSessionOptionsRequest;
-import org.apache.arrow.flight.SetSessionOptionsResult;
-import org.apache.arrow.flight.auth2.BearerCredentialWriter;
+import io.deephaven.proto.controller.PersistentQueryInfoMessage;
+import io.deephaven.proto.controller.PersistentQueryStatusEnum;
+import org.apache.arrow.flight.*;
 import org.apache.arrow.flight.auth2.ClientBearerHeaderHandler;
 import org.apache.arrow.flight.auth2.ClientIncomingAuthHeaderMiddleware;
 import org.apache.arrow.flight.client.ClientCookieMiddleware;
-import org.apache.arrow.flight.grpc.CredentialCallOption;
-import org.apache.arrow.flight.grpc.NettyClientBuilder;
 import org.apache.arrow.flight.sql.FlightSqlClient;
 import org.apache.arrow.flight.sql.impl.FlightSql.SqlInfo;
 import org.apache.arrow.flight.sql.util.TableRef;
@@ -68,8 +42,19 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.calcite.avatica.Meta.StatementType;
 import org.checkerframework.checker.nullness.qual.Nullable;
+import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.URI;
+import java.sql.SQLException;
+import java.time.Duration;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static io.deephaven.proto.controller.PersistentQueryStatusEnum.PQS_RUNNING;
 
 /** A {@link FlightSqlClient} handler. */
 public final class ArrowFlightSqlClientHandler implements AutoCloseable {
@@ -546,6 +531,127 @@ public final class ArrowFlightSqlClientHandler implements AutoCloseable {
         getOptions());
   }
 
+  private static class CorePlusSessionFactory {
+    final DndSessionFactoryFlight sessionFactory;
+    final ControllerClientGrpc controllerClient;
+    final UserContext userContext;
+
+    /**
+     * Create and authenticate the session factory.
+     *
+     * @param serverUrl the server's URL, like {@code https://server.domain.com:8000} or {@code https://server.domain.com:8123}
+     * @param userName  a username
+     * @param password  a password
+     * @param keyFile   an authentication keyfile
+     * @throws IOException from the underlying calls
+     */
+    private CorePlusSessionFactory(final String serverUrl, final String userName, final String password, final String keyFile) throws IOException {
+      System.out.println("Connecting to " + serverUrl);
+      final String connectionUrl = serverUrl + "/iris/connection.json";
+      sessionFactory = new DndSessionFactoryFlight(connectionUrl);
+
+      final DeephavenClusterConnection clusterConnection = new DeephavenClusterConnection(connectionUrl);
+      if (keyFile != null) {
+        sessionFactory.privateKey(keyFile);
+        clusterConnection.privateKey(keyFile);
+      } else {
+        sessionFactory.password(userName, password);
+        clusterConnection.password(userName, password);
+      }
+
+      userContext = clusterConnection.getUserContext();
+      controllerClient = clusterConnection.getControllerClient();
+    }
+
+    /**
+     * Return the initialized {@link CorePlusSessionFactory}
+     *
+     * @return the {@link CorePlusSessionFactory}
+     */
+    public DndSessionFactoryFlight getSessionFactory() {
+      return sessionFactory;
+    }
+
+    /**
+     * Get the user that this session is operating as.
+     *
+     * @return the user that this session is operating as
+     */
+    public String getEffectiveUser() {
+      return userContext.getEffectiveUser();
+    }
+
+    /**
+     * Ensure that a PQ is running.
+     *
+     * @param pqName the PQ name
+     */
+    public void ensurePqRunning(final String pqName) {
+      final PersistentQueryInfoMessage infoMessage = sessionFactory.getPQ(pqName);
+      if (infoMessage == null) {
+        throw new IllegalArgumentException("Persistent query " + pqName + " does not exist");
+      }
+
+      final PersistentQueryStatusEnum pqStatus = infoMessage.getState().getStatus();
+      if (pqStatus == PQS_RUNNING) {
+        return;
+      }
+
+      final AtomicReference<PersistentQueryStatusEnum> newStatusReference = new AtomicReference<>(null);
+
+      final ControllerClientGrpc.ObserverImpl observer = new ControllerClientGrpc.ObserverImpl() {
+        @Override
+        public void handlePut(@NotNull final PersistentQueryInfoMessage value) {
+          System.out.println("Received update for " + value.getConfig().getName() + ": " + value.getState().getStatus());
+          synchronized (newStatusReference) {
+            final String newPqName = value.getConfig().getName();
+            if (!pqName.equals(newPqName)) {
+              return;
+            }
+
+            final PersistentQueryStatusEnum observedStatus = value.getState().getStatus();
+            if (isTerminalOrRunning(observedStatus)) {
+              newStatusReference.set(observedStatus);
+              newStatusReference.notify();
+            }
+          }
+        }
+      };
+
+      controllerClient.subscribeToAll();
+
+      // Get the PQ to running...
+      final long maxSleepMillis = 60_000;
+      try {
+        synchronized (newStatusReference) {
+          controllerClient.addObserver(observer);
+          controllerClient.restartQuery(infoMessage.getConfig());
+          long currentTime = System.currentTimeMillis();
+          final long endTime = currentTime + maxSleepMillis;
+          // We'll give it 60 seconds to get to running or fail
+          while (currentTime < endTime && !isTerminalOrRunning(newStatusReference.get())) {
+            final long sleepMillis = endTime - currentTime;
+            newStatusReference.wait(sleepMillis);
+            currentTime = System.currentTimeMillis();
+          }
+        }
+      } catch (InterruptedException e) {
+        throw new RuntimeException("Interrupted while waiting for PQ to get running", e);
+      } finally {
+        controllerClient.removeObserver(observer);
+      }
+
+      final PersistentQueryStatusEnum latestStatus = newStatusReference.get();
+      if (newStatusReference.get() != PQS_RUNNING) {
+        throw new IllegalStateException("PQ did not get to running in " + maxSleepMillis + " milliseconds, state is " + latestStatus);
+      }
+    }
+
+    private boolean isTerminalOrRunning(final PersistentQueryStatusEnum status) {
+      return status != null && (status == PQS_RUNNING || controllerClient.isTerminal(status));
+    }
+  }
+
   /** Builder for {@link ArrowFlightSqlClientHandler}. */
   public static final class Builder {
     private final Set<FlightClientMiddleware.Factory> middlewareFactories = new HashSet<>();
@@ -556,6 +662,8 @@ public final class ArrowFlightSqlClientHandler implements AutoCloseable {
     @VisibleForTesting String username;
 
     @VisibleForTesting String password;
+
+    @VisibleForTesting String pqName;
 
     @VisibleForTesting String trustStorePath;
 
@@ -674,6 +782,17 @@ public final class ArrowFlightSqlClientHandler implements AutoCloseable {
      */
     public Builder withPassword(final String password) {
       this.password = password;
+      return this;
+    }
+
+    /**
+     * Sets the persistent query name for this handler.
+     *
+     * @param pqName the name of the persistent query to use for this handler.
+     * @return this instance.
+     */
+    public Builder withPqName(final String pqName) {
+      this.pqName = pqName;
       return this;
     }
 
@@ -898,6 +1017,82 @@ public final class ArrowFlightSqlClientHandler implements AutoCloseable {
      * @throws SQLException on error.
      */
     public ArrowFlightSqlClientHandler build() throws SQLException {
+
+      final String serverUrl = "https://" + host + ":" + port;
+
+      HttpUrlPropertyInputStreamLoader.setServerUrl(serverUrl);
+
+//      ServiceLoader<PropertyInputStreamLoader> loader = ServiceLoader.load(PropertyInputStreamLoader.class);
+//      int count = 0;
+//      for (PropertyInputStreamLoader provider : loader) {
+//        System.out.println("Found provider: " + provider.getClass().getName());
+//        count++;
+//      }
+//
+//      System.out.println("Total providers loaded: " + count);
+
+
+      final CorePlusSessionFactory sessionFactory;
+      try {
+        sessionFactory = new CorePlusSessionFactory(serverUrl, username, password, null);
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
+      sessionFactory.ensurePqRunning(pqName);
+
+      // Ensure we release resources when done
+      DndSessionFlight coreplusSessionBarrage = null;
+      try {
+        coreplusSessionBarrage = sessionFactory.getSessionFactory().persistentQuery(pqName);
+
+        final PersistentQueryStatusEnum statusEnum = coreplusSessionBarrage.getInfo().getState().getStatus();
+        if (statusEnum != PQS_RUNNING) {
+          throw new RuntimeException("Persistent query must be running");
+        }
+
+        FlightClient coreFlightClient = coreplusSessionBarrage.getFlightSession().getClient();
+
+//        boolean isUsingUserPasswordAuth = username != null && token == null;
+        final ArrayList<CallOption> credentialOptions = new ArrayList<>();
+//        if (isUsingUserPasswordAuth) {
+//          // If the authFactory has already been used for a handshake, use the existing token.
+//          // This can occur if the authFactory is being re-used for a new connection spawned for
+//          // getStream().
+//          if (authFactory.getCredentialCallOption() != null) {
+//            credentialOptions.add(authFactory.getCredentialCallOption());
+//          } else {
+//            // Otherwise do the handshake and get the token if possible.
+//            credentialOptions.add(
+//                    ClientAuthenticationUtils.getAuthenticate(
+//                            coreFlightClient, username, password, authFactory, options.toArray(new CallOption[0])));
+//          }
+//        } else if (token != null) {
+//          credentialOptions.add(
+//                  ClientAuthenticationUtils.getAuthenticate(
+//                          coreFlightClient,
+//                          new CredentialCallOption(new BearerCredentialWriter(token)),
+//                          options.toArray(new CallOption[0])));
+//        }
+
+        return createNewHandler(
+                getCacheKey(), coreFlightClient, this, credentialOptions, catalog, flightClientCache);
+      }  catch (final IllegalArgumentException
+                      | IOException
+                      | FlightRuntimeException e) {
+        final SQLException originalException = new SQLException(e);
+        if (coreplusSessionBarrage != null) {
+          try {
+            coreplusSessionBarrage.close();
+          } catch (final IOException ex) {
+            originalException.addSuppressed(ex);
+          }
+        }
+        throw originalException;
+      }
+
+
+
+  /*
       // Copy middleware so that the build method doesn't change the state of the builder fields
       // itself.
       Set<FlightClientMiddleware.Factory> buildTimeMiddlewareFactories =
@@ -992,6 +1187,7 @@ public final class ArrowFlightSqlClientHandler implements AutoCloseable {
         }
         throw originalException;
       }
+   */
     }
   }
 }

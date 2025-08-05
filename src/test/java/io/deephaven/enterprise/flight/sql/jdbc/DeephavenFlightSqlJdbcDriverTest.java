@@ -10,7 +10,7 @@ class DeephavenFlightSqlJdbcDriverTest {
     static void connect() throws SQLException {
 //        String jdbcUrl = "jdbc:arrow-flight-sql://localhost:10000?Authorization=Anonymous&useEncryption=false&x-deephaven-auth-cookie-request=true";
 //        String jdbcUrl = "jdbc:deephaven-flight-sql://localhost:10000?Authorization=Anonymous&useEncryption=false&x-deephaven-auth-cookie-request=true";
-        String jdbcUrl = "jdbc:deephaven-flight-sql://jianfengmao-bhs-vm.int.illumon.com:8123?pqname=FlightSqlJdbcPQ&user=iris&password=iris";
+        String jdbcUrl = "jdbc:deephaven-flight-sql://jianfengmao-bhs-sanluis.int.illumon.com:8123?pqname=FlightSqlJdbcPQ&user=iris&password=iris";
 
         try {
             final Driver driver = DriverManager.getDriver(jdbcUrl);
