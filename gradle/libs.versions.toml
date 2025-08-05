@@ -1,0 +1,21 @@
+[versions]
+deephaven-core = '0.39.5'
+arrow = "18.3.0"
+caffeine = '3.1.8'
+calcite-avatica = "1.26.0"
+junit = '5.12.2'
+
+[libraries]
+junit-bom = { module = 'org.junit:junit-bom', version.ref = 'junit' }
+junit-jupiter = { module = 'org.junit.jupiter:junit-jupiter' }
+junit-platform-launcher = { module = 'org.junit.platform:junit-platform-launcher'}
+junit-jupiter-engine = { module = "org.junit.jupiter:junit-jupiter-engine", version.ref = "junit" }
+
+deephaven-bom = { module = 'io.deephaven:deephaven-bom', version.ref = 'deephaven-core' }
+deephaven-configuration = { module = 'io.deephaven:deephaven-Configuration'}
+
+arrow-flight-sql = { module = "org.apache.arrow:flight-sql", version.ref = "arrow" }
+github-ben-manes = { module = "com.github.ben-manes.caffeine:caffeine", version.ref = "caffeine" }
+#arrow-flight-sql-jdbc-core = { module = "org.apache.arrow:flight-sql-jdbc-core", version.ref = "arrow" }
+#arrow-flight-sql-jdbc-driver = { module = "org.apache.arrow:flight-sql-jdbc-driver", version.ref = "arrow" }
+apache-calcite-avatica = { module = 'org.apache.calcite.avatica:avatica', version.ref = "calcite-avatica" }
