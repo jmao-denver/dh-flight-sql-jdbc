@@ -17,24 +17,24 @@
         <Bug pattern="EI_EXPOSE_REP2"/>
     </Match>
     <Match>
-        <Class name="org.apache.arrow.driver.jdbc.client.ArrowFlightSqlClientHandler"/>
+        <Class name="io.deephaven.enterprise.flight.sql.jdbc.client.ArrowFlightSqlClientHandler"/>
         <Bug pattern="EI_EXPOSE_REP2"/>
     </Match>
     <Match>
-        <Class name="org.apache.arrow.driver.jdbc.utils.ConnectionWrapper"/>
+        <Class name="io.deephaven.enterprise.flight.sql.jdbc.utils.ConnectionWrapper"/>
         <Bug pattern="EI_EXPOSE_REP2"/>
     </Match>
     <Match>
-        <Class name="org.apache.arrow.driver.jdbc.ArrowFlightJdbcDataSource"/>
+        <Class name="io.deephaven.enterprise.flight.sql.jdbc.ArrowFlightJdbcDataSource"/>
         <Bug pattern="EI_EXPOSE_REP2"/>
     </Match>
     <Match>
-        <Class name="org.apache.arrow.driver.jdbc.ArrowFlightJdbcCursor"/>
+        <Class name="io.deephaven.enterprise.flight.sql.jdbc.ArrowFlightJdbcCursor"/>
         <Bug pattern="EI_EXPOSE_REP2"/>
     </Match>
 
     <Match>
-        <Class name="org.apache.arrow.driver.jdbc.ArrowFlightJdbcDataSource"/>
+        <Class name="io.deephaven.enterprise.flight.sql.jdbc.ArrowFlightJdbcDataSource"/>
         <Bug pattern="EI_EXPOSE_REP"/>
     </Match>
 </FindBugsFilter>
