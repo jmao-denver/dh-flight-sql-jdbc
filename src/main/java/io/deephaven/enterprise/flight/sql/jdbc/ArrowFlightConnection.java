@@ -17,6 +17,7 @@
 package io.deephaven.enterprise.flight.sql.jdbc;
 
 import io.deephaven.enterprise.flight.sql.jdbc.client.ArrowFlightSqlClientHandler;
+import io.deephaven.enterprise.flight.sql.jdbc.client.utils.FlightClientCache;
 import io.deephaven.enterprise.flight.sql.jdbc.utils.ArrowFlightConnectionConfigImpl;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import java.sql.SQLException;
@@ -112,6 +113,8 @@ public final class ArrowFlightConnection extends AvaticaConnection {
           .withRetainCookies(config.retainCookies())
           .withRetainAuth(config.retainAuth())
           .withCatalog(config.getCatalog())
+          .withClientCache(config.useClientCache() ? new FlightClientCache() : null)
+          .withConnectTimeout(config.getConnectTimeout())
           .build();
     } catch (final SQLException e) {
       try {
